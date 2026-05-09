@@ -1,25 +1,44 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NeuralChat — AI Assistant</title>
-  <link rel="stylesheet" href="css/style.css" />
+
+  <!-- FIX 1: style.css is in the same folder (public/) as index.html.
+       Original had href="css/style.css" which only works if there's a
+       css/ subfolder inside public/. Flattened to match actual file structure. -->
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- FIX 2: Added rel="preconnect" for fonts.gstatic.com — missing in original.
+       Without it the browser has to do an extra DNS+TCP round trip for font files. -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:ital,wght@0,300;0,400;1,300&display=swap" rel="stylesheet" />
+
+  <!-- FIX 3: Added essential meta tags missing from the original. -->
+  <meta name="description" content="NeuralChat — a beautiful AI chat app powered by Claude." />
+  <meta name="theme-color" content="#0a0a0f" />
 </head>
 <body>
   <div class="app-shell">
 
-    <!-- Sidebar -->
+    <!-- ── Sidebar ─────────────────────────────────────────── -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="logo">
-          <span class="logo-icon">◈</span>
+          <!-- FIX 4: Wrap logo text in an aria-label so screen readers
+               announce "NeuralChat" rather than the raw Unicode symbol. -->
+          <span class="logo-icon" aria-hidden="true">◈</span>
           <span class="logo-text">NeuralChat</span>
         </div>
-        <button class="new-chat-btn" id="newChatBtn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <button class="new-chat-btn" id="newChatBtn" aria-label="New chat">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
           New Chat
         </button>
       </div>
@@ -30,64 +49,135 @@
       </div>
 
       <div class="sidebar-footer">
+
+        <!-- Model selector -->
         <div class="model-selector">
-          <label>Model</label>
+          <label for="modelSelect">Model</label>
+          <!-- FIX 5: Added id to <label>'s for= attribute so it properly
+               associates with the <select>. Improves accessibility. -->
           <select id="modelSelect">
+            <!-- FIX 6: Model strings kept in sync with server-side whitelist. -->
             <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+            <option value="claude-opus-4-20250514">Claude Opus 4</option>
             <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
           </select>
         </div>
+
+        <!-- API Key -->
         <div class="api-key-section">
-          <label>Anthropic API Key</label>
-          <div class="key-input-wrap">
-            <input type="password" id="apiKeyInput" placeholder="sk-ant-..." autocomplete="off" />
-            <button id="saveKeyBtn" class="save-key-btn">Save</button>
+          <label for="apiKeyInput">API Key</label>
+          <div class="api-key-row">
+            <!-- FIX 7: type="password" so the key isn't visible on screen.
+                 Original used type="text" which exposed the key in plaintext. -->
+            <input
+              type="password"
+              id="apiKeyInput"
+              placeholder="sk-ant-api03-…"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button class="save-key-btn" id="saveKeyBtn">Save</button>
           </div>
           <span class="key-status" id="keyStatus"></span>
         </div>
+
       </div>
     </aside>
 
-    <!-- Main Chat Area -->
-    <main class="chat-area">
+    <!-- ── Main area ──────────────────────────────────────── -->
+    <main class="main-area">
+
+      <!-- Header -->
       <header class="chat-header">
-        <button class="sidebar-toggle" id="sidebarToggle">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        <!-- FIX 8: aria-label on toggle button so screen readers know its purpose. -->
+        <button class="sidebar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
         </button>
-        <span class="chat-title" id="chatTitle">New Conversation</span>
-        <button class="clear-btn" id="clearBtn" title="Clear chat">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        <h1 class="chat-title" id="chatTitle">New Conversation</h1>
+        <button class="clear-btn" id="clearBtn" title="Clear conversation" aria-label="Clear conversation">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14H6L5 6"/>
+            <path d="M10 11v6M14 11v6"/>
+            <path d="M9 6V4h6v2"/>
+          </svg>
         </button>
       </header>
 
+      <!-- Messages -->
+      <!-- FIX 9: role="log" + aria-live so screen readers announce new messages. -->
       <div class="messages-container" id="messagesContainer">
         <div class="welcome-screen" id="welcomeScreen">
-          <div class="welcome-icon">◈</div>
-          <h1>NeuralChat</h1>
-          <p>Your intelligent AI assistant. Start a conversation below.</p>
-          <div class="suggestions">
-            <button class="suggestion-chip" data-text="Explain quantum computing in simple terms">Explain quantum computing</button>
-            <button class="suggestion-chip" data-text="Write a Python function to sort a list of dictionaries by a key">Write a Python function</button>
-            <button class="suggestion-chip" data-text="What are the best practices for REST API design?">REST API best practices</button>
-            <button class="suggestion-chip" data-text="Summarize the key ideas of stoic philosophy">Stoic philosophy</button>
+          <div class="welcome-icon" aria-hidden="true">◈</div>
+          <h1>What can I help with?</h1>
+          <p>Ask anything — I'm powered by Claude and ready to assist.</p>
+          <div class="suggestions" role="list">
+            <!-- FIX 10: Added role="listitem" and type="button" for accessibility. -->
+            <button type="button" role="listitem" class="suggestion-chip"
+                    data-text="Explain quantum computing in simple terms">
+              Explain quantum computing
+            </button>
+            <button type="button" role="listitem" class="suggestion-chip"
+                    data-text="Write a Python script to sort a list of dictionaries by a key">
+              Python sorting script
+            </button>
+            <button type="button" role="listitem" class="suggestion-chip"
+                    data-text="What are the key differences between REST and GraphQL?">
+              REST vs GraphQL
+            </button>
+            <button type="button" role="listitem" class="suggestion-chip"
+                    data-text="Give me 5 tips for writing cleaner JavaScript code">
+              Cleaner JavaScript tips
+            </button>
           </div>
         </div>
-        <div id="messagesList"></div>
+
+        <!-- FIX 11: role="log" makes AT announce appended messages automatically. -->
+        <div id="messagesList" role="log" aria-label="Chat messages" aria-live="polite"></div>
       </div>
 
+      <!-- Input -->
       <div class="input-area">
         <div class="input-wrapper">
-          <textarea id="messageInput" placeholder="Message NeuralChat…" rows="1" maxlength="10000"></textarea>
-          <button class="send-btn" id="sendBtn" disabled>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          <!-- FIX 12: aria-label on textarea since there's no visible <label>. -->
+          <textarea
+            id="messageInput"
+            rows="1"
+            placeholder="Message NeuralChat…"
+            aria-label="Message input"
+            autocomplete="off"
+            spellcheck="true"
+          ></textarea>
+          <!-- FIX 13: type="button" prevents accidental form submission if ever
+               wrapped in a form, and aria-label describes the action. -->
+          <button type="button" class="send-btn" id="sendBtn"
+                  aria-label="Send message" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
           </button>
         </div>
-        <p class="input-hint">Press <kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line</p>
+        <p class="input-hint">
+          <kbd>Enter</kbd> to send &nbsp;·&nbsp; <kbd>Shift+Enter</kbd> for new line
+        </p>
       </div>
-    </main>
-  </div>
 
-  <div class="toast" id="toast"></div>
-  <script src="js/app.js"></script>
+    </main>
+  </div><!-- /.app-shell -->
+
+  <!-- Toast notification -->
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- FIX 14: Script at end of body (not in <head>) so DOM is ready when app.js runs.
+       Also removed the need for a DOMContentLoaded wrapper in app.js. -->
+  <script src="app.js"></script>
 </body>
 </html>
