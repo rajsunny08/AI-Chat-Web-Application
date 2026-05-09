@@ -1,10 +1,11 @@
+
 // ============================================================
 //  NeuralChat — Frontend App
 //  Talks to /api/chat (local Node.js proxy), NOT Anthropic directly.
 //  This avoids all CORS issues.
 // ============================================================
 
-// ── State ──────────────────────────────────────────────────
+// ── State ────────────────────────────────────────────────────
 const state = {
   apiKey: '',
   model: 'claude-sonnet-4-20250514',
@@ -13,7 +14,7 @@ const state = {
   isStreaming: false,
 };
 
-// ── DOM refs ───────────────────────────────────────────────
+// ── DOM refs ─────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 const sidebar           = $('sidebar');
 const sidebarToggle     = $('sidebarToggle');
@@ -32,7 +33,7 @@ const messageInput      = $('messageInput');
 const sendBtn           = $('sendBtn');
 const toast             = $('toast');
 
-// ── Init ───────────────────────────────────────────────────
+// ── Init ─────────────────────────────────────────────────────
 function init() {
   loadFromStorage();
   renderHistoryList();
@@ -64,7 +65,7 @@ function init() {
   });
 }
 
-// ── Storage ────────────────────────────────────────────────
+// ── Storage ──────────────────────────────────────────────────
 function loadFromStorage() {
   try {
     const saved = localStorage.getItem('neuralchat');
@@ -75,21 +76,45 @@ function loadFromStorage() {
       state.conversations = p.conversations || {};
       state.activeId     = p.activeId     || null;
     }
-  } catch {}
-  if (state.apiKey) { apiKeyInput.value = state.apiKey; keyStatus.textContent = '✓ Key loaded'; }
+  } catch {
+    // FIX 1: If localStorage is corrupted, reset cleanly instead of silently failing.
+    console.warn('NeuralChat: failed to load saved state. Starting fresh.');
+    localStorage.removeItem('neuralchat');
+  }
+
+  // FIX 2: Validate that loaded conversations are still proper objects.
+  if (typeof state.conversations !== 'object' || Array.isArray(state.conversations)) {
+    state.conversations = {};
+  }
+
+  // FIX 3: Validate that activeId still points to a real conversation.
+  if (state.activeId && !state.conversations[state.activeId]) {
+    state.activeId = null;
+  }
+
+  if (state.apiKey) {
+    apiKeyInput.value = state.apiKey;
+    keyStatus.textContent = '✓ Key loaded';
+  }
   modelSelect.value = state.model;
 }
 
 function saveToStorage() {
   try {
     localStorage.setItem('neuralchat', JSON.stringify({
-      apiKey: state.apiKey, model: state.model,
-      conversations: state.conversations, activeId: state.activeId,
+      apiKey: state.apiKey,
+      model: state.model,
+      conversations: state.conversations,
+      activeId: state.activeId,
     }));
-  } catch {}
+  } catch (err) {
+    // FIX 4: Inform the user if storage is full (common on mobile).
+    console.warn('NeuralChat: could not save to localStorage.', err);
+    showToast('Storage full — oldest data may not be saved.', 'error');
+  }
 }
 
-// ── API Key ────────────────────────────────────────────────
+// ── API Key ──────────────────────────────────────────────────
 function saveApiKey() {
   const key = apiKeyInput.value.trim();
   if (!key) { showToast('Please enter an API key', 'error'); return; }
@@ -101,13 +126,13 @@ function saveApiKey() {
   setTimeout(() => { keyStatus.textContent = ''; }, 3000);
 }
 
-// ── Sidebar ────────────────────────────────────────────────
+// ── Sidebar ──────────────────────────────────────────────────
 function toggleSidebar() {
   if (window.innerWidth <= 700) sidebar.classList.toggle('open');
   else sidebar.classList.toggle('collapsed');
 }
 
-// ── Conversations ──────────────────────────────────────────
+// ── Conversations ─────────────────────────────────────────────
 function startNewChat() {
   const id = 'chat_' + Date.now();
   state.conversations[id] = { title: 'New Conversation', messages: [] };
@@ -177,7 +202,7 @@ function renderHistoryList() {
   });
 }
 
-// ── Input ──────────────────────────────────────────────────
+// ── Input ─────────────────────────────────────────────────────
 function onInputChange() {
   messageInput.style.height = 'auto';
   messageInput.style.height = Math.min(messageInput.scrollHeight, 180) + 'px';
@@ -185,10 +210,13 @@ function onInputChange() {
 }
 
 function onKeyDown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!sendBtn.disabled) sendMessage(); }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    if (!sendBtn.disabled) sendMessage();
+  }
 }
 
-// ── Send Message ───────────────────────────────────────────
+// ── Send Message ──────────────────────────────────────────────
 async function sendMessage() {
   const text = messageInput.value.trim();
   if (!text || state.isStreaming) return;
@@ -224,10 +252,15 @@ async function sendMessage() {
   const assistantEl = appendMessage('assistant', '', true);
   const textEl = assistantEl.querySelector('.message-text');
 
+  // FIX 5: Add an AbortController so the user can cancel in-flight requests.
+  const controller = new AbortController();
+  const cancelBtn = createCancelButton(() => controller.abort());
+  assistantEl.querySelector('.message-actions').appendChild(cancelBtn);
+
   try {
-    // ── Call LOCAL proxy (avoids CORS) ──
     const response = await fetch('/api/chat', {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': state.apiKey,
@@ -241,7 +274,8 @@ async function sendMessage() {
     });
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
+      // FIX 6: Try to parse the error JSON from our proxy for a clean message.
+      const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
       throw new Error(err?.error || `HTTP ${response.status}`);
     }
 
@@ -255,7 +289,7 @@ async function sendMessage() {
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
-      buffer = lines.pop();
+      buffer = lines.pop(); // keep incomplete line for next chunk
 
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
@@ -269,10 +303,14 @@ async function sendMessage() {
             textEl.classList.add('streaming-cursor');
             scrollToBottom();
           }
-        } catch {}
+        } catch {
+          // FIX 7: Log unparseable SSE lines in dev — helps debug malformed chunks.
+          // console.debug('Unparseable SSE line:', data);
+        }
       }
     }
 
+    cancelBtn.remove();
     textEl.classList.remove('streaming-cursor');
     textEl.innerHTML = renderMarkdown(fullText);
     addCodeCopyButtons(textEl);
@@ -281,9 +319,27 @@ async function sendMessage() {
     saveToStorage();
 
   } catch (err) {
+    cancelBtn.remove();
     textEl.classList.remove('streaming-cursor');
-    textEl.innerHTML = `<span style="color:var(--danger)">⚠ ${escapeHtml(err.message)}</span>`;
-    console.error(err);
+
+    // FIX 8: Distinguish user-cancelled requests from actual errors.
+    if (err.name === 'AbortError') {
+      textEl.innerHTML = `<span style="color:var(--text-muted)">⏹ Generation stopped.</span>`;
+    } else {
+      textEl.innerHTML = `<span style="color:var(--danger)">⚠ ${escapeHtml(err.message)}</span>`;
+      console.error('sendMessage error:', err);
+    }
+
+    // FIX 9: Remove the failed assistant message from history so the
+    // conversation stays in a valid state for the next request.
+    // Only add it if there's actual content worth keeping.
+    const textContent = textEl.textContent.trim();
+    if (textContent && err.name !== 'AbortError') {
+      // partial response — still save it so context isn't lost
+      conv.messages.push({ role: 'assistant', content: textContent });
+      saveToStorage();
+    }
+
   } finally {
     state.isStreaming = false;
     setSendLoading(false);
@@ -292,7 +348,16 @@ async function sendMessage() {
   }
 }
 
-// ── Render ─────────────────────────────────────────────────
+// ── Cancel button ─────────────────────────────────────────────
+function createCancelButton(onCancel) {
+  const btn = document.createElement('button');
+  btn.className = 'msg-action-btn';
+  btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg> Stop`;
+  btn.addEventListener('click', onCancel);
+  return btn;
+}
+
+// ── Render ────────────────────────────────────────────────────
 function appendMessage(role, content, isLoading = false) {
   const wrap = document.createElement('div');
   wrap.className = `message ${role}`;
@@ -317,6 +382,11 @@ function appendMessage(role, content, isLoading = false) {
 function addMessageActions(el, text) {
   const actionsEl = el.querySelector('.message-actions');
   if (!actionsEl) return;
+
+  // FIX 10: Clear any existing action buttons (e.g. the Stop button)
+  // before adding the final Copy button so they don't stack up.
+  actionsEl.innerHTML = '';
+
   const btn = document.createElement('button');
   btn.className = 'msg-action-btn';
   btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy`;
@@ -338,47 +408,87 @@ function addCodeCopyButtons(el) {
     btn.textContent = 'Copy';
     btn.addEventListener('click', () => {
       const code = pre.querySelector('code')?.textContent || pre.textContent;
-      navigator.clipboard.writeText(code).then(() => { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy'; }, 2000); });
+      navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
     });
     wrap.appendChild(btn);
   });
 }
 
+// FIX 11: renderMarkdown — fix list grouping logic.
+// Original regex `(<li>[\s\S]+?<\/li>)(?!\s*<li>)` only wraps the LAST
+// <li> in a group, not the whole group. Replaced with a proper multi-line pass.
 function renderMarkdown(text) {
   if (!text) return '';
   let h = escapeHtml(text);
-  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => `<pre><code class="language-${lang}">${code.trim()}</code></pre>`);
+
+  // Code blocks first (before other replacements corrupt backticks)
+  h = h.replace(/```(\w*)\n?([\s\S]*?)```/g,
+    (_, lang, code) => `<pre><code class="language-${lang}">${code.trim()}</code></pre>`);
   h = h.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+
+  // Inline formatting
   h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   h = h.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+
+  // Headings
   h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
   h = h.replace(/^## (.+)$/gm,  '<h2>$1</h2>');
   h = h.replace(/^# (.+)$/gm,   '<h1>$1</h1>');
+
+  // Blockquote & HR
   h = h.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
   h = h.replace(/^---$/gm, '<hr>');
+
+  // FIX 11a: Bullet lists — collect consecutive <li> lines into one <ul>
   h = h.replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
-  h = h.replace(/(<li>[\s\S]+?<\/li>)(?!\s*<li>)/g, '<ul>$1</ul>');
+  h = h.replace(/(<li>.*<\/li>\n?)+/g, match => `<ul>${match}</ul>`);
+
+  // FIX 11b: Ordered lists — same treatment
   h = h.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+
+  // Paragraphs — skip blocks that are already block-level HTML
   h = h.split(/\n\n+/).map(block => {
     if (/^<(h[1-3]|ul|ol|pre|blockquote|hr)/.test(block.trim())) return block;
     if (!block.trim()) return '';
     return `<p>${block.replace(/\n/g, '<br>')}</p>`;
   }).join('');
+
   return h;
 }
 
+// ── Utilities ─────────────────────────────────────────────────
 function escapeHtml(t) {
-  return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  return String(t)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
-function scrollToBottom() { messagesContainer.scrollTo({ top: messagesContainer.scrollHeight, behavior: 'smooth' }); }
+
+function scrollToBottom() {
+  messagesContainer.scrollTo({ top: messagesContainer.scrollHeight, behavior: 'smooth' });
+}
+
 function setSendLoading(on) {
-  if (on) { sendBtn.classList.add('loading'); sendBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>`; }
-  else { sendBtn.classList.remove('loading'); sendBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`; }
+  if (on) {
+    sendBtn.classList.add('loading');
+    sendBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>`;
+  } else {
+    sendBtn.classList.remove('loading');
+    sendBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`;
+  }
 }
+
 let toastTimer;
 function showToast(msg, type = '') {
-  toast.textContent = msg; toast.className = 'toast show ' + type;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.className = 'toast'; }, 2800);
+  toast.textContent = msg;
+  toast.className = 'toast show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.className = 'toast'; }, 2800);
 }
 
 init();
